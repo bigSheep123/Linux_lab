@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -87,7 +88,8 @@ void DealAll(struct dirent *Dirent, struct stat *buf)
     DealuAndg(buf);
     // 权限，硬连接，用户和所属组，文件字节大小，最后一次修改时间，文件名字
     // std::cout << buf->st_mode << std :: endl;
-    std::cout << " " << buf->st_size;
+    // std::cout << " " << buf->st_size;
+    printf("%5ld",buf->st_size);
 
     // std::cout << buf->st_ctim.tv_nsec << std::endl;
     DealTime(buf);
@@ -108,13 +110,15 @@ int main()
     struct dirent *Dirent = nullptr;
     while ((Dirent = readdir(dir)) != nullptr)
     {
-        Dirent = readdir(dir);
+        // std::cout << Dirent->d_name << std::endl;
         struct stat *buf = (struct stat *)malloc(sizeof(struct stat));
         char *name = Dirent->d_name;
         char *tmp = path;
+        char* sb = "/";
         size_t len1 = strlen(tmp);
         size_t len2 = strlen(name);
-        size_t total_len = len1 + len2 + 1;
+        size_t len3 = strlen(sb);
+        size_t total_len = len1 + len2 + len3 + 1;
 
         // 分配内存
         char *result = (char *)malloc(total_len * sizeof(char));
@@ -126,13 +130,13 @@ int main()
         // 复制第一个字符串
         strcpy(result, tmp);
         // 追加第二个字符串
-        char* sb = "\\";
-        strcpy(result,sb);
+        strcat(result,sb);
         strcat(result, name);
-        printf("%s\n",result);
+        // printf("%s\n",result);
         lstat(result, buf);
-
-        // DealAll(Dirent, buf);
+        // if(name == "." || name == "..")
+        //     continue;
+        DealAll(Dirent, buf);
     }
 
     closedir(dir);
