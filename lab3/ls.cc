@@ -34,6 +34,8 @@ void DealMode(struct stat *st)
     if (S_ISFIFO(type))
         printf("p");
 
+
+
     // 提取权限位（低 9 位）
     // 用户权限
     printf("%c%c%c",
