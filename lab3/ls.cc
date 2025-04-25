@@ -12,17 +12,22 @@
 #include <sys/stat.h>
 #include <pwd.h>
 #include <grp.h>
+#include <vector>
 
 #define SIZE 100
+std::vector<char*> dirarr;
 
-void DealMode(struct stat *st)
+void DealMode(struct dirent *Dirent,struct stat *st)
 {
     mode_t perm = st->st_mode & 0777;
     mode_t type = st->st_mode;
     if (S_ISREG(type))
         printf("-");
-    if (S_ISDIR(type))
+    if (S_ISDIR(type)){
         printf("d");
+        dirarr.push_back(Dirent->d_name);
+    }
+
     if (S_ISLNK(type))
         printf("l");
     if (S_ISBLK(type))
@@ -33,8 +38,6 @@ void DealMode(struct stat *st)
         printf("s");
     if (S_ISFIFO(type))
         printf("p");
-
-
 
     // 提取权限位（低 9 位）
     // 用户权限
@@ -81,7 +84,7 @@ void DealTime(struct stat *st)
 
 void DealAll(struct dirent *Dirent, struct stat *buf)
 {
-    DealMode(buf);
+    DealMode(Dirent,buf);
     // std::cout << buf->st_uid << buf->st_gid << buf->st_size<< std::endl;
     // std::cout << buf->st_mode << std::endl;
     std::cout << " " << buf->st_nlink;
@@ -116,10 +119,10 @@ int main()
         struct stat *buf = (struct stat *)malloc(sizeof(struct stat));
         char *name = Dirent->d_name;
         char *tmp = path;
-        char* sb = "/";
+        char* smt = "/";
         size_t len1 = strlen(tmp);
         size_t len2 = strlen(name);
-        size_t len3 = strlen(sb);
+        size_t len3 = strlen(smt);
         size_t total_len = len1 + len2 + len3 + 1;
 
         // 分配内存
@@ -132,7 +135,7 @@ int main()
         // 复制第一个字符串
         strcpy(result, tmp);
         // 追加第二个字符串
-        strcat(result,sb);
+        strcat(result,smt);
         strcat(result, name);
         // printf("%s\n",result);
         lstat(result, buf);
@@ -140,6 +143,46 @@ int main()
         //     continue;
         DealAll(Dirent, buf);
     }
+
+    // while (!dirarr.empty())
+    // {
+    //     DIR *dir = opendir(dirarr.back());
+    //     if (!dir)
+    //         assert("open the dir fialed");
+
+    //     // 读取目录文件
+    //     struct dirent *Dirent = nullptr;
+    //     while ((Dirent = readdir(dir)) != nullptr)
+    //     {
+    //         // std::cout << Dirent->d_name << std::endl;
+    //         struct stat *buf = (struct stat *)malloc(sizeof(struct stat));
+    //         char *name = Dirent->d_name;
+    //         char *tmp = path;
+    //         char *smt = "/";
+    //         size_t len1 = strlen(tmp);
+    //         size_t len2 = strlen(name);
+    //         size_t len3 = strlen(smt);
+    //         size_t total_len = len1 + len2 + len3 + 1;
+
+    //         // 分配内存
+    //         char *result = (char *)malloc(total_len * sizeof(char));
+    //         if (result == NULL)
+    //         {
+    //             fprintf(stderr, "内存分配失败\n");
+    //         }
+
+    //         // 复制第一个字符串
+    //         strcpy(result, tmp);
+    //         // 追加第二个字符串
+    //         strcat(result, smt);
+    //         strcat(result, name);
+    //         // printf("%s\n",result);
+    //         lstat(result, buf);
+    //         // if(name == "." || name == "..")
+    //         //     continue;
+    //         DealAll(Dirent, buf);
+    //     }
+    // }
 
     closedir(dir);
     return 0;
