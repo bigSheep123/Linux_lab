@@ -1,189 +1,201 @@
-#include <cassert>
-#include <cstddef>
-#include <cstdlib>
-#include <cstring>
-#include <ctime>
-#include <iostream>
-#include <ostream>
-#include <unistd.h>
-#include <cstdio>
 #include <dirent.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <pwd.h>
 #include <grp.h>
-#include <vector>
-
-#define SIZE 100
-std::vector<char*> dirarr;
-
-void DealMode(struct dirent *Dirent,struct stat *st)
-{
-    mode_t perm = st->st_mode & 0777;
-    mode_t type = st->st_mode;
-    if (S_ISREG(type))
-        printf("-");
-    if (S_ISDIR(type)){
-        printf("d");
-        dirarr.push_back(Dirent->d_name);
+#include <pwd.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <time.h>
+#include <unistd.h>
+#define SIZE 1024
+ 
+typedef struct File {
+  char name[100];      // 文件名
+  char user[100];      // 文件所有者
+  char belong[100];    // 文件所有者所在组
+  char last_time[100]; // 文件最后修改时间
+  off_t size;          // 文件大小
+  nlink_t links;       // 文件硬链接数或目录子目录数
+  char type[10];       // 文件类型
+  bool IsSymLink = true;
+  void show() {
+    printf("%s\t%ld\t%s\t%s\t%ld\t%s\t%s\n", type, links, user, belong, size,
+           last_time, name);
+  }
+} file;
+ 
+void decode_type(file *f, mode_t mode) {
+  char name[10];
+  for (int i = 0; i < sizeof(name); i++)
+    name[i] = '-';
+  if (S_ISDIR(mode))
+    name[0] = 'd';
+  if (mode & S_IRUSR)
+    name[1] = 'r';
+  if (mode & S_IWUSR)
+    name[2] = 'w';
+  if (mode & S_IXUSR)
+    name[3] = 'x';
+  if (mode & S_IRGRP)
+    name[4] = 'r';
+  if (mode & S_IWGRP)
+    name[5] = 'w';
+  if (mode & S_IXGRP)
+    name[6] = 'x';
+  if (mode & S_IROTH)
+    name[7] = 'r';
+  if (mode & S_IWOTH)
+    name[8] = 'w';
+  if (mode & S_IXOTH)
+    name[9] = 'x';
+  memcpy(f->type, name, sizeof(name));
+}
+ 
+void decode_links(file *f, nlink_t links) { f->links = links; }
+ 
+void decode_userName(file *f, uid_t uid, gid_t gid) {
+  struct passwd *ps = getpwuid(uid);
+  struct group *gp = getgrgid(gid);
+  memcpy(f->user, ps->pw_name, strlen(ps->pw_name));
+  memcpy(f->belong, gp->gr_name, strlen(gp->gr_name));
+}
+ 
+void decode_fileSize(file *f, off_t size) { f->size = size; }
+ 
+void decode_time(file *f, time_t time) {
+  struct tm lt;
+  localtime_r(&time, &lt);
+  char ti[100];
+  strftime(ti, sizeof(ti), "%b %d %H:%M", &lt);
+  // printf("%s\n",ti);
+  memcpy(f->last_time, ti, sizeof(ti));
+}
+ 
+void decode_name(file *f, char *name, char *pwd) {
+  memcpy(f->name, name, strlen(name));
+  if (f->IsSymLink) {
+    char tmp[100] = {0};
+    ssize_t len = readlink(pwd, tmp, sizeof(tmp) - 1);
+    if (len != -1) {
+      strcat(f->name, " -> ");
+      strcat(f->name, tmp);
     }
-
-    if (S_ISLNK(type))
-        printf("l");
-    if (S_ISBLK(type))
-        printf("b");
-    if (S_ISCHR(type))
-        printf("c");
-    if (S_ISSOCK(type))
-        printf("s");
-    if (S_ISFIFO(type))
-        printf("p");
-
-    // 提取权限位（低 9 位）
-    // 用户权限
-    printf("%c%c%c",
-           (perm & S_IRUSR) ? 'r' : '-',
-           (perm & S_IWUSR) ? 'w' : '-',
-           (perm & S_IXUSR) ? 'x' : '-');
-
-    // 组权限
-    printf("%c%c%c",
-           (perm & S_IRGRP) ? 'r' : '-',
-           (perm & S_IWGRP) ? 'w' : '-',
-           (perm & S_IXGRP) ? 'x' : '-');
-
-    // 其他用户权限
-    printf("%c%c%c",
-           (perm & S_IROTH) ? 'r' : '-',
-           (perm & S_IWOTH) ? 'w' : '-',
-           (perm & S_IXOTH) ? 'x' : '-');
+    f->name[strlen(f->name)] = '\0';
+    return;
+  }
+  f->name[strlen(name)] = '\0';
 }
-
-void DealuAndg(struct stat *st)
-{
-    // 将 st_uid 转换为用户名
-    struct passwd *pwd = getpwuid(st->st_uid);
-    printf(" %s", (pwd != NULL) ? pwd->pw_name : "未知用户");
-
-    // 将 st_gid 转换为组名
-    struct group *grp = getgrgid(st->st_gid);
-    printf(" %s", (grp != NULL) ? grp->gr_name : "未知组");
-}
-
-void DealTime(struct stat *st)
-{
-    time_t ctime_sec = st->st_ctim.tv_sec;
-    // 转换为本地时间
-    struct tm *time_info = localtime(&ctime_sec);
-
-    // 格式化输出
-    char buffer[64];
-    strftime(buffer, sizeof(buffer), "%b %d %H:%M", time_info);
-    printf(" %s ", buffer); // 示例输出: Apr 18 11:24
-}
-
-void DealAll(struct dirent *Dirent, struct stat *buf)
-{
-    DealMode(Dirent,buf);
-    // std::cout << buf->st_uid << buf->st_gid << buf->st_size<< std::endl;
-    // std::cout << buf->st_mode << std::endl;
-    std::cout << " " << buf->st_nlink;
-    // std::cout << buf->st_ctim.tv_nsec << std::endl;
-    // printf("%s\n",str);
-    DealuAndg(buf);
-    // 权限，硬连接，用户和所属组，文件字节大小，最后一次修改时间，文件名字
-    // std::cout << buf->st_mode << std :: endl;
-    // std::cout << " " << buf->st_size;
-    printf("%5ld",buf->st_size);
-
-    // std::cout << buf->st_ctim.tv_nsec << std::endl;
-    DealTime(buf);
-    std::cout << Dirent->d_name << std::endl;
-}
-
-int main()
-{
-    // str 保存当前工作目录的绝对路径
-    char path[SIZE];
-    getcwd(path, SIZE);
-    // open 该文件流
-    DIR *dir = opendir(path);
-    if (!dir)
-        assert("open the dir fialed");
-
-    // 读取目录文件
-    struct dirent *Dirent = nullptr;
-    while ((Dirent = readdir(dir)) != nullptr)
-    {
-        // std::cout << Dirent->d_name << std::endl;
-        struct stat *buf = (struct stat *)malloc(sizeof(struct stat));
-        char *name = Dirent->d_name;
-        char *tmp = path;
-        char* smt = "/";
-        size_t len1 = strlen(tmp);
-        size_t len2 = strlen(name);
-        size_t len3 = strlen(smt);
-        size_t total_len = len1 + len2 + len3 + 1;
-
-        // 分配内存
-        char *result = (char *)malloc(total_len * sizeof(char));
-        if (result == NULL)
-        {
-            fprintf(stderr, "内存分配失败\n");
-        }
-
-        // 复制第一个字符串
-        strcpy(result, tmp);
-        // 追加第二个字符串
-        strcat(result,smt);
-        strcat(result, name);
-        // printf("%s\n",result);
-        lstat(result, buf);
-        // if(name == "." || name == "..")
-        //     continue;
-        DealAll(Dirent, buf);
+ 
+int main(int argc, char *argv[]) {
+  char cwd[SIZE];
+  char option;
+  bool flag_a = false, flag_l = false, flag_L = false;
+  DIR *dir = NULL;
+  struct dirent *read = NULL;
+  if (argc == 1 && getcwd(cwd, sizeof(cwd)) == NULL) {
+    perror("getwpd");
+    return -1;
+  } else if (argc > 1) {
+    memcpy(cwd, argv[1], strlen(argv[1]) + 1);
+  }
+  if ((dir = opendir(cwd)) == NULL) {
+    perror("opendir");
+    return -1;
+  }
+  while ((option = getopt(argc, argv, "alL")) != -1) {
+    switch (option) {
+    case 'a':
+      flag_a = true;
+      break;
+    case 'l':
+      flag_l = true;
+      break;
+    case 'L':
+      flag_L = true;
+      break;
+    case '?':
+      perror("unknown option!");
+      // return -1;
     }
-
-    // while (!dirarr.empty())
-    // {
-    //     DIR *dir = opendir(dirarr.back());
-    //     if (!dir)
-    //         assert("open the dir fialed");
-
-    //     // 读取目录文件
-    //     struct dirent *Dirent = nullptr;
-    //     while ((Dirent = readdir(dir)) != nullptr)
-    //     {
-    //         // std::cout << Dirent->d_name << std::endl;
-    //         struct stat *buf = (struct stat *)malloc(sizeof(struct stat));
-    //         char *name = Dirent->d_name;
-    //         char *tmp = path;
-    //         char *smt = "/";
-    //         size_t len1 = strlen(tmp);
-    //         size_t len2 = strlen(name);
-    //         size_t len3 = strlen(smt);
-    //         size_t total_len = len1 + len2 + len3 + 1;
-
-    //         // 分配内存
-    //         char *result = (char *)malloc(total_len * sizeof(char));
-    //         if (result == NULL)
-    //         {
-    //             fprintf(stderr, "内存分配失败\n");
-    //         }
-
-    //         // 复制第一个字符串
-    //         strcpy(result, tmp);
-    //         // 追加第二个字符串
-    //         strcat(result, smt);
-    //         strcat(result, name);
-    //         // printf("%s\n",result);
-    //         lstat(result, buf);
-    //         // if(name == "." || name == "..")
-    //         //     continue;
-    //         DealAll(Dirent, buf);
-    //     }
-    // }
-
-    closedir(dir);
-    return 0;
+  }
+  // equal to: ls
+  if (!flag_a && !flag_l) {
+    while ((read = readdir(dir)) != NULL) {
+      if (read->d_name[0] != '.')
+        printf("%s\n", read->d_name);
+    }
+    return 1;
+  }
+  // equal to: ls -l
+  if (!flag_a && flag_l) {
+    int total = 0;
+    file *f = (file *)malloc(sizeof(file));
+    while ((read = readdir(dir)) != NULL) {
+      bool isLink = false;
+      char pwd[SIZE];
+      f->IsSymLink = true;
+      if (read->d_name[0] == '.')
+        continue;
+      struct stat *buf = (struct stat *)malloc(sizeof(struct stat));
+      // 获取文件的绝对地址
+      memcpy(pwd, cwd, sizeof(cwd));
+      strcat(pwd, "/");
+      strcat(pwd, read->d_name);
+      //sprintf(pwd, "%s%s%s", cwd, "/", read->d_name);
+      // 获取stat状态
+      lstat(pwd, buf);
+      if (!flag_L || !S_ISLNK(buf->st_mode)) {
+        f->IsSymLink = false;
+        stat(pwd, buf);
+      }
+      // 获取type
+      decode_type(f, buf->st_mode);
+      decode_links(f, buf->st_nlink);
+      decode_fileSize(f, buf->st_size);
+      decode_userName(f, buf->st_uid, buf->st_gid);
+      decode_time(f, buf->st_mtime);
+      decode_name(f, read->d_name, pwd);
+      total += buf->st_size;
+      free(buf);
+      f->show();
+    }
+    printf("%dk", (total) / 1024);
+  }
+ 
+  // equal to:ls -al
+  if (flag_a && flag_l) {
+    int total = 0;
+    file *f = (file *)malloc(sizeof(file));
+    while ((read = readdir(dir)) != NULL) {
+      bool isLink = false;
+      char pwd[SIZE];
+      f->IsSymLink = true;
+      struct stat *buf = (struct stat *)malloc(sizeof(struct stat));
+      // 获取文件的绝对地址
+      memcpy(pwd, cwd, sizeof(cwd));
+      strcat(pwd, "/");
+      strcat(pwd, read->d_name);
+      // 获取stat状态
+      lstat(pwd, buf);
+      if (!flag_L || !S_ISLNK(buf->st_mode)) {
+        stat(pwd, buf);
+        f->IsSymLink = false;
+      }
+      // 获取type
+      decode_type(f, buf->st_mode);
+      decode_links(f, buf->st_nlink);
+      decode_fileSize(f, buf->st_size);
+      decode_userName(f, buf->st_uid, buf->st_gid);
+      decode_time(f, buf->st_mtime);
+      decode_name(f, read->d_name, pwd);
+      total += buf->st_size;
+      free(buf);
+      f->show();
+    }
+    printf("%dk", (total) / 1024);
+  }
+  closedir(dir);
 }

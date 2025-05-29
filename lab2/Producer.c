@@ -1,30 +1,58 @@
-#include "Buffer.h"
-#include <assert.h>
+#include "Public.h"
+#include <stdlib.h>
 #include <time.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/sem.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <string.h>
 
-int main(int argc,char* argv[]){
-    assert(argc==3);
-    key_t key=ftok(argv[1],0);
-    struct DATAPACK* ptr=GetSharedMemory(key,false);
-    struct BuffQueue* ready2produce=&ptr->write;
-    struct BuffQueue* ready2consume=&ptr->read;
-    srand(time(NULL));
-    while(true){
-        printf("Producer:%s Waiting...\n",argv[2]);
-        int ready=pop_front(ready2produce,ptr->mem);
-        if(0<=ready&&ready<BufferSize){
-            // sleep(3);
-            for(int j=0;j<31;++j)
-                ptr->mem[ready].data[j]='A'+rand()%26;
-            ptr->mem[ready].data[31]=0;
-            printf("Producer:%s Produced:%s\n",argv[2],ptr->mem[ready].data);
-            push_back(ready2consume,ptr->mem,ready);
+void producer_delay() {
+    struct timespec ts = { 
+        .tv_sec = 0,
+        .tv_nsec = (rand() % 5000 + 1000) * 1000000 // 1-6ms随机延迟
+    };
+    nanosleep(&ts, NULL);
+}
+
+void write_product(SharedBuffer* buf, int slot, const char* data) {
+    memcpy(buf->storage[slot], data, DATA_SIZE);
+    buf->slot_status[slot] = 1;  // 标记为已填充
+    printf("[Producer] Write data to slot %d: %.5s...\n", slot, data);
+}
+
+int main() {
+    SharedBuffer* buffer = attach_shared_mem();
+    int mutex = init_semaphore(SEM_KEY_MUTEX, 1);
+    int empty = init_semaphore(SEM_KEY_EMPTY, BUFFER_SLOTS);
+    int full = init_semaphore(SEM_KEY_FULL, 0);
+    
+    for(int cycle = 0; ; ++cycle) {
+        char data[DATA_SIZE];
+        int fd = open("./producer_source.txt", O_RDONLY);
+        read(fd, data, sizeof(data));
+        close(fd);
+
+        sem_p(empty);  // 等待空槽位
+        sem_p(mutex);  // 进入临界区
+        
+        for(int i = 0; i < BUFFER_SLOTS; ++i) {
+            if(buffer->slot_status[i] == 0) {
+                write_product(buffer, i, data);
+                break;
+            }
         }
-        else{
-            printf("%d\n",ready);
-            printf("Error Occured!\n");
-            exit(-1);
-        }
-        // sleep(2);
+        
+        sem_v(mutex); // 退出临界区
+        sem_v(full);  // 增加满槽计数
+        producer_delay();
     }
+    
+    cleanup_sem(mutex);
+    cleanup_sem(empty);
+    cleanup_sem(full);
+    detach_shared_mem(buffer);
+    return 0;
 }

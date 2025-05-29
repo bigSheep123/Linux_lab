@@ -10,4 +10,4 @@ all: $(PROGS)
 	$(CC) $(CFLAGS) -o $@ $<
 .PHONY:clean
 clean:
-	rm -rf Console Consumer Producer
+	rm -rf Consumer Producer
