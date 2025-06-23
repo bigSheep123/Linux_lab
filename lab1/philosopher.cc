@@ -1,75 +1,148 @@
-#include <pthread.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
+#include <cassert>
+#include <cstddef>
+#include<pthread.h>
+#include <iostream>
+#include <semaphore.h>
+#include <unistd.h>
+#include <string>
 
+// 哲学家用餐问题，可以用 2种思路去实现  1. mutex  2. sem 
+// 我这里选择用 mutex 的方式去实现
+// 我这里使用 奇偶 哲学家解决了这个问题
 
-#define PHILOSOPHER_COUNT 5
+#define NUM 5
 
-pthread_mutex_t chopsticks[PHILOSOPHER_COUNT];
-int philosopher_ids[PHILOSOPHER_COUNT] = {0, 1, 2, 3, 4};
+typedef struct Philosopher 
+{
+    pthread_t tid;
+    int  id;
+    std::string name;
+} Philosopher;
 
-// 创造延迟
-// 1-6ms随机延迟
-void random_delay() {
-    struct timespec ts;
-    ts.tv_sec = 0;
-    ts.tv_nsec = (rand() % 5000000) + 1000000;  
-    nanosleep(&ts, NULL);
+// 筷子 是 临界资源，给每一个筷子一把锁以及 id 号
+typedef struct Chopstick
+{
+    pthread_mutex_t lock;
+    int id;
+} Chopstick;
+
+Chopstick Chopsticks[NUM];
+Philosopher Philosophers[NUM];
+
+void delay()
+{
+    srand((unsigned int)time(nullptr));
+    unsigned int time = rand() % 4000 + 2100;
+    usleep(time);
 }
 
-void initialize_mutexes() {
-    for (int i = 0; i < PHILOSOPHER_COUNT; i++)
-        pthread_mutex_init(&chopsticks[i], NULL);
-}
+void think()  {   delay();  }
+void eat() { sleep(1); }
 
-//奇数编号哲学家优先获取右侧筷子，偶数编号哲学家优先获取左侧筷子
-//打破循环等待条件：通过不同顺序获取资源，确保不会形成环形等待链
-void alternate_order_eat(int philosopher_id) {
-    if (philosopher_id % 2 == 0) {
-        pthread_mutex_lock(&chopsticks[philosopher_id]);
-        pthread_mutex_lock(&chopsticks[(philosopher_id + 1) % PHILOSOPHER_COUNT]);
-    } else {
-        pthread_mutex_lock(&chopsticks[(philosopher_id + 1) % PHILOSOPHER_COUNT]);
-        pthread_mutex_lock(&chopsticks[philosopher_id]);
+// 如果所有哲学家同时拿起一边的筷子会导致死锁问题
+void* Action(void* args)
+{
+    int  num = *(int*)args;
+    while (1)
+    {
+        think();
+        sleep(3);
+        pthread_mutex_lock(&Chopsticks[num].lock);
+        printf("%d 号哲学家 %s 拿起左边的 %d 号筷子成功\n",
+               num, Philosophers[num].name.c_str(), num);
+
+        pthread_mutex_lock(&Chopsticks[(num + 1) % NUM].lock);
+        printf("%d 号哲学家 %s 拿起右边的 %d 号筷子成功\n",
+               num, Philosophers[num].name.c_str(), (num + 1) % NUM);
+
+        printf("=== %d 号哲学家 %s 开始吃饭了 ===\n", num,
+               Philosophers[num].name.c_str());
+        eat();
+        printf("依次放下左右两边的筷子\n");
+        pthread_mutex_unlock(&Chopsticks[num].lock);
+        pthread_mutex_unlock(&Chopsticks[(num + 1) % NUM].lock);
     }
-    
-    printf("Philosopher %d is eating\n", philosopher_id);
-    random_delay();
-    
-    pthread_mutex_unlock(&chopsticks[philosopher_id]);
-    pthread_mutex_unlock(&chopsticks[(philosopher_id + 1) % PHILOSOPHER_COUNT]);
+
+    return nullptr;
 }
 
-void* philosopher_behavior(void* arg) {
-    int id = *(int*)arg;
-    while (1) {
-        printf("Philosopher %d is thinking\n", id);
-        random_delay();
-        printf("Philosopher %d is hungry\n", id);
-        alternate_order_eat(id);
-    }
-    return NULL;
-}
+// 规定奇数哲学家用左边的筷子，偶数哲学家用右边的筷子
+// 奇偶性问题能够很好的分配资源，消除竞争
+void* SovleAction(void* args)
+{
+    int  num = *(int*)args;
+    while (1)
+    {
+        think();
+        sleep(3);
+        if(num % 2 == 0)
+        {
+            pthread_mutex_lock(&Chopsticks[num].lock);
+            printf("%d 号哲学家 %s 拿起左边的 %d 号筷子成功\n",
+                   num, Philosophers[num].name.c_str(), num);
 
-int main() {
-    pthread_t philosophers[PHILOSOPHER_COUNT];
-    srand(time(NULL));
-    initialize_mutexes();
-
-    for (int i = 0; i < PHILOSOPHER_COUNT; i++) {
-        int result = pthread_create(&philosophers[i], NULL, philosopher_behavior, &philosopher_ids[i]);
-        if (result != 0) {
-            fprintf(stderr, "Thread creation error: %s\n", strerror(result));
-            exit(EXIT_FAILURE);
+            pthread_mutex_lock(&Chopsticks[(num + 1) % NUM].lock);
+            printf("%d 号哲学家 %s 拿起右边的 %d 号筷子成功\n",
+                   num, Philosophers[num].name.c_str(), (num + 1) % NUM);
         }
+        else if (num % 2 == 1)
+        {
+            pthread_mutex_lock(&Chopsticks[(num + 1) % NUM].lock);
+            printf("%d 号哲学家 %s 拿起右边的 %d 号筷子成功\n",
+                   num, Philosophers[num].name.c_str(), (num + 1) % NUM);
+
+            pthread_mutex_lock(&Chopsticks[num].lock);
+            printf("%d 号哲学家 %s 拿起左边的 %d 号筷子成功\n",
+                   num, Philosophers[num].name.c_str(), num);
+        }
+
+        printf("=== %d 号哲学家 %s 开始吃饭了 ===\n", num,
+               Philosophers[num].name.c_str());
+        eat();
+        printf("依次放下左右两边的筷子\n");
+        pthread_mutex_unlock(&Chopsticks[num].lock);
+        pthread_mutex_unlock(&Chopsticks[(num + 1) % NUM].lock);
     }
 
-    for (int i = 0; i < PHILOSOPHER_COUNT; i++) {
-        pthread_join(philosophers[i], NULL);
-        pthread_mutex_destroy(&chopsticks[i]);
+    return nullptr;
+}
+
+void Name()
+{
+    Philosophers[0].name = "孔子";
+    Philosophers[1].name = "老子";
+    Philosophers[2].name = "孟子";
+    Philosophers[3].name = "刁寒";
+    Philosophers[4].name = "牛顿";
+}
+
+int main()
+{
+    for(int i = 0; i < NUM ; i++)
+    {
+        Chopsticks[i].id = i;
+        pthread_mutex_init(&Chopsticks[i].lock, nullptr);        
     }
+    Name();
+    for(int i = 0; i < NUM ; i++)
+    {
+        Philosophers[i].id = i;
+
+        // Action --> 死锁
+        //
+        pthread_create(&Philosophers[i].tid,
+                      nullptr,SovleAction,&Philosophers[i].id);
+    }
+
+    for(int i = 0; i < NUM ; i ++)
+    {
+        pthread_join(Philosophers[i].tid,nullptr);
+    }
+
+    for(int i = 0; i < NUM ; i++)
+    {
+        pthread_mutex_destroy(&Chopsticks[i].lock);
+    }
+
     return 0;
 }

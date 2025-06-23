@@ -1,0 +1,157 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <pwd.h>
+#include <grp.h>
+#include <time.h>
+#include <string.h>
+#include <errno.h>
+
+// 获取文件类型的符号表示
+char get_file_type(mode_t mode) {
+    if (S_ISREG(mode))  return '-';
+    if (S_ISDIR(mode))  return 'd';
+    if (S_ISCHR(mode))  return 'c';
+    if (S_ISBLK(mode))  return 'b';
+    if (S_ISFIFO(mode)) return 'p';
+    if (S_ISLNK(mode))  return 'l';
+    if (S_ISSOCK(mode)) return 's';
+    return '?';
+}
+
+// 获取文件权限字符串
+void get_permission_string(mode_t mode, char *perm_str) {
+    // 用户权限
+    perm_str[0] = (mode & S_IRUSR) ? 'r' : '-';
+    perm_str[1] = (mode & S_IWUSR) ? 'w' : '-';
+    perm_str[2] = (mode & S_IXUSR) ? 'x' : '-';
+    
+    // 组权限
+    perm_str[3] = (mode & S_IRGRP) ? 'r' : '-';
+    perm_str[4] = (mode & S_IWGRP) ? 'w' : '-';
+    perm_str[5] = (mode & S_IXGRP) ? 'x' : '-';
+    
+    // 其他用户权限
+    perm_str[6] = (mode & S_IROTH) ? 'r' : '-';
+    perm_str[7] = (mode & S_IWOTH) ? 'w' : '-';
+    perm_str[8] = (mode & S_IXOTH) ? 'x' : '-';
+    
+    perm_str[9] = '\0';
+}
+
+// 获取文件所有者的用户名
+const char *get_owner_name(uid_t uid) {
+    struct passwd *pw = getpwuid(uid);
+    return pw ? pw->pw_name : "unknown";
+}
+
+// 获取文件所属组的组名
+const char *get_group_name(gid_t gid) {
+    struct group *gr = getgrgid(gid);
+    return gr ? gr->gr_name : "unknown";
+}
+
+// 获取格式化的时间字符串
+char *get_formatted_time(const time_t *time) {
+    struct tm *tm_info = localtime(time);
+    static char buffer[20];
+    strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M", tm_info);
+    return buffer;
+}
+
+// 列出目录中的文件信息
+void list_directory(const char *path) {
+    DIR *dir;
+    struct dirent *entry;
+    struct stat statbuf;
+    char full_path[PATH_MAX];
+    
+    // 打开目录
+    if ((dir = opendir(path)) == NULL) {
+        perror("无法打开目录");
+        return;
+    }
+    
+    printf("\n目录: %s\n", path);
+    printf("%-10s %-11s %-8s %-8s %-8s %-19s %s\n", 
+           "类型权限", "硬链接", "所有者", "组", "大小", "最后修改", "文件名");
+    printf("-------------------------------------------------------\n");
+    
+    // 遍历目录中的所有条目
+    while ((entry = readdir(dir)) != NULL) {
+        // 忽略当前目录和父目录标记
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+        
+        // 构建文件的完整路径
+        snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+    
+        // 获取文件信息
+        if (lstat(full_path, &statbuf) < 0) {
+            perror(full_path);
+            continue;
+        }
+        
+        // 准备文件信息
+        char type = get_file_type(statbuf.st_mode);
+        char perm_str[10];
+        get_permission_string(statbuf.st_mode, perm_str);
+        char permissions[12];
+        snprintf(permissions, sizeof(permissions), "%c%s", type, perm_str);
+        
+        const char *owner = get_owner_name(statbuf.st_uid);
+        const char *group = get_group_name(statbuf.st_gid);
+        
+        // 对于符号链接，需要特殊处理
+        char filename[NAME_MAX + 10];
+        if (S_ISLNK(statbuf.st_mode)) {
+            char link_target[PATH_MAX];
+            ssize_t len = readlink(full_path, link_target, sizeof(link_target) - 1);
+            if (len != -1) {
+                link_target[len] = '\0';
+                snprintf(filename, sizeof(filename), "%s -> %s", entry->d_name, link_target);
+            } else {
+                snprintf(filename, sizeof(filename), "%s", entry->d_name);
+            }
+        } else {
+            strncpy(filename, entry->d_name, sizeof(filename));
+        }
+        
+        // 输出文件信息
+        printf("%-10s %-11ld %-8s %-8s %-8ld %-19s %s\n", 
+               permissions,
+               (long)statbuf.st_nlink,
+               owner,
+               group,
+               (long)statbuf.st_size,
+               get_formatted_time(&statbuf.st_mtime),
+               filename);
+    }
+    
+    // 关闭目录
+    closedir(dir);
+}
+
+int main(int argc, char *argv[]) {
+    char cwd[PATH_MAX];
+    
+    // 如果提供了目录参数
+    if (argc > 1) {
+        for (int i = 1; i < argc; i++) {
+            list_directory(argv[i]);
+        }
+    } 
+    // 如果没有提供参数，使用当前工作目录
+    else {
+        if (getcwd(cwd, sizeof(cwd))) {
+            list_directory(cwd);
+        } else {
+            perror("无法获取当前工作目录");
+            return EXIT_FAILURE;
+        }
+    }
+    
+    return EXIT_SUCCESS;
+}
