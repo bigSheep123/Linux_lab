@@ -1,7 +1,5 @@
 {
-    "C_Cpp.errorSquiggles": "disabled",
     "files.associations": {
-        "common.h": "c",
-        "test": "c"
+        "OS_CORE.C": "cpp"
     }
 }

@@ -58,17 +58,6 @@ void DealFile(char* destPath,char* srcPath)
 
 void DealDir(char* destPath,char* srcPath)
 {
-    struct stat dest_stat;
-    // 检查目标路径状态
-    if (lstat(destPath, &dest_stat) == 0) { // 目标存在
-        if (!S_ISDIR(dest_stat.st_mode)) {
-            std::cerr << "Error: Destination exists and is not a directory\n";
-            exit(EXIT_FAILURE); // 立即终止程序
-        }
-    } else { // 目标不存在则创建
-        mkdir(destPath, 0777);
-    }
-
     DIR* srcDir = opendir(srcPath);
     struct dirent* it;
     while( (it = readdir(srcDir)) != nullptr)

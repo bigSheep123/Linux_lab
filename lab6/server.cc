@@ -1,129 +1,149 @@
-// http server
-#include <arpa/inet.h>
-#include <cstddef>
-#include <cstdlib>
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/sendfile.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <unistd.h>
-#define SIZE 1024
-// TODO
-// should deal different situation with http
-void Handle_Http(int fd)
-{
-    int buf;
-    char rev[SIZE], method[SIZE], url[SIZE], version[SIZE], headers[SIZE];
-    struct stat stat_buf;
-    memset(rev, 0, SIZE);
-    buf = recv(fd, rev, SIZE, 0);
-    if (buf < 0)
-    {
-        perror("WRONG WITH REV");
-        exit(0);
-    }
-    sscanf(rev, "%s%s%s", method, url, version);
-    // Print the parsed information
-    printf("Method: %s\n", method);
-    printf("URL: %s\n", url);
-    printf("HTTP Version: %s\n\n", version);
-    if (strcmp(url, "/") == 0)
-    {
-        int file = open("/home/dh/labLinux/lab6/index.html", O_RDONLY);
-        if (file < 0)
-        {
-            perror("NO HTML FILE");
-            exit(0);
-        }
-        if (stat("/home/dh/labLinux/lab6/index.html", &stat_buf) < 0)
-        {
-            perror("stat");
-            exit(1);
-        }
-        sprintf(headers,
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: "
-                "%ld\r\n\r\n",
-                stat_buf.st_size);
-        // 发送状态行和消息报头
-        send(fd, headers, strlen(headers), 0);
+#include <fcntl.h>
+#include <cstring>
+#include <cstdlib>
+#include <cstdio>
 
-        sendfile(fd, file, NULL, stat_buf.st_size);
-    }
-    else if (strcmp(url, "/cat.png") == 0)
-    {
-        int file = open("/home/lyh_irie/cpp_work/web/cat.png", O_RDONLY);
-        if (file < 0)
-        {
-            perror("NO HTML FILE");
-            exit(0);
-        }
-        if (stat("/home/lyh_irie/cpp_work/web/cat.png", &stat_buf) < 0)
-        {
-            perror("stat");
-            exit(1);
-        }
-        sprintf(headers,
-                "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: "
-                "%ld\r\n\r\n",
-                stat_buf.st_size);
-        // 发送状态行和消息报头
-        send(fd, headers, strlen(headers), 0);
+#define BUFFER_SIZE 1024
+#define DEFAULT_PORT 8080
+#define WEB_ROOT "/var/www" // 保存文件
 
-        sendfile(fd, file, NULL, stat_buf.st_size);
-    }
-    else
-    {
-        char response[] =
-            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nHello, World!";
-        send(fd, response, strlen(response), 0);
-    }
+void safe_close(int fd) {
+    if (fd >= 0) close(fd);
 }
 
-int main()
-{
-    int sockfd = 0, accpet_fd = 0;
-    struct sockaddr_in serv_addr;
-    if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-    {
-        perror("Can Not Create socket");
-        exit(0);
-    }
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(8080);
-    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    if ((bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr))) < 0)
-    {
-        perror("Bind Failed");
-        exit(0);
-    }
-    if ((listen(sockfd, 10)) < 0)
-    {
-        perror("Listen Failed");
-        exit(0);
-    }
-    while (1)
-    {
-        if ((accpet_fd = accept(sockfd, (struct sockaddr *)NULL, NULL)) < 0)
-        {
-            perror("Accept Failed");
-            exit(0);
-        }
-        // pid_t pid = fork();
-        // if (pid < 0) {
-        //   perror("fork failed");
-        //   exit(0);
-        // } else if (pid == 0) {
-        Handle_Http(accpet_fd);
-        close(accpet_fd);
-        //    exit(0);
-        // } else {
-        //   close(accpet_fd);
+void send_error(int fd, int status, const char* message) {
+    char response[BUFFER_SIZE];
+    snprintf(response, sizeof(response),
+             "HTTP/1.1 %d %s\r\nContent-Type: text/plain\r\n\r\n%s",
+             status, message, message);
+    send(fd, response, strlen(response), 0);
+}
+
+void serve_file(int fd, const char* path, const char* content_type) {
+    struct stat file_stat;
+    if (stat(path, &file_stat) < 0) {
+        send_error(fd, 404, "Not Found");
+        return;
     }
 
-    close(sockfd);
+    int file_fd = open(path, O_RDONLY);
+    if (file_fd < 0) {
+        send_error(fd, 403, "Forbidden");
+        return;
+    }
+
+    char headers[BUFFER_SIZE];
+    snprintf(headers, sizeof(headers),
+             "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %ld\r\n\r\n",
+             content_type, file_stat.st_size);
+
+    send(fd, headers, strlen(headers), 0);
+    sendfile(fd, file_fd, nullptr, file_stat.st_size);
+    safe_close(file_fd);
+}
+
+const char* get_content_type(const char* path) {
+    const char* ext = strrchr(path, '.');
+    if (!ext) return "text/plain";
+    
+    if (strcmp(ext, ".html") == 0) return "text/html";
+    if (strcmp(ext, ".css") == 0) return "text/css";
+    if (strcmp(ext, ".js") == 0) return "application/javascript";
+    if (strcmp(ext, ".png") == 0) return "image/png";
+    if (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0) return "image/jpeg";
+    
+    return "text/plain";
+}
+
+// 处理HTTP请求
+void handle_http(int fd) {
+    char buffer[BUFFER_SIZE], method[16], url[256], version[16];
+    memset(buffer, 0, BUFFER_SIZE);
+
+    // 接收请求数据
+    ssize_t bytes_read = recv(fd, buffer, BUFFER_SIZE - 1, 0);
+    if (bytes_read <= 0) {
+        perror("recv failed");
+        safe_close(fd);
+        return;
+    }
+
+    if (sscanf(buffer, "%15s %255s %15s", method, url, version) != 3) {
+        send_error(fd, 400, "Bad Request");
+        safe_close(fd);
+        return;
+    }
+
+    char full_path[512];
+    snprintf(full_path, sizeof(full_path), "%s%s", WEB_ROOT, 
+             (strcmp(url, "/") == 0) ? "/index.html" : url);
+
+    serve_file(fd, full_path, get_content_type(full_path));
+    safe_close(fd);
+}
+
+int main(int argc, char* argv[]) {
+    int port = (argc > 1) ? atoi(argv[1]) : DEFAULT_PORT;
+    
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        perror("socket creation failed");
+        return EXIT_FAILURE;
+    }
+
+    // 设置SO_REUSEADDR避免"Address already in use"错误
+    int opt = 1;
+    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    struct sockaddr_in serv_addr{};
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(port);
+    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+    if (bind(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
+        perror("bind failed");
+        safe_close(sockfd);
+        return EXIT_FAILURE;
+    }
+
+    if (listen(sockfd, 10) < 0) {
+        perror("listen failed");
+        safe_close(sockfd);
+        return EXIT_FAILURE;
+    }
+
+    printf("HTTP server running on port %d\n", port);
+
+    while (true) {
+        struct sockaddr_in client_addr{};
+        socklen_t client_len = sizeof(client_addr);
+        int client_fd = accept(sockfd, (struct sockaddr*)&client_addr, &client_len);
+        
+        if (client_fd < 0) {
+            perror("accept failed");
+            continue;
+        }
+
+        // 多进程处理并发请求
+        pid_t pid = fork();
+        if (pid == 0) { // 子进程
+            close(sockfd);
+            handle_http(client_fd);
+            exit(EXIT_SUCCESS);
+        } else if (pid > 0) { // 父进程
+            close(client_fd);
+        } else {
+            perror("fork failed");
+            close(client_fd);
+        }
+    }
+
+    safe_close(sockfd);
+    return EXIT_SUCCESS;
 }

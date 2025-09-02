@@ -1,0 +1,13 @@
+{
+    "files.associations": {
+        "OS_CORE.C": "cpp",
+        "OS_FLAG.C": "cpp",
+        "OS_MBOX.C": "cpp",
+        "OS_MUTEX.C": "cpp",
+        "OS_MEM.C": "cpp",
+        "OS_Q.C": "cpp",
+        "OS_SEM.C": "cpp",
+        "OS_TASK.C": "cpp",
+        "OS_TIME.C": "cpp"
+    }
+}
